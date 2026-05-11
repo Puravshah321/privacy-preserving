@@ -283,6 +283,12 @@ The semantic mask (V3 vs V2) trades 3% absolute privacy for a **+6.6 pp SSIM gai
 **Notebook:** `prism-face-anonymization (2).ipynb`  
 **Datasets:** LFW · CelebA-HQ
 
+<p align="center">
+  <img src="images/prism%20architecture.jpeg" width="90%" alt="Approach 2 Architecture">
+  <br>
+  <em>Architecture overview of the PRISM Multi-Frequency Riemannian pipeline.</em>
+</p>
+
 ### 5.1 Motivation
 
 PrIdentity operates in the raw pixel domain with a single global perturbation budget. This ignores two structural facts:
