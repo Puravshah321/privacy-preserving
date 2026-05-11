@@ -43,37 +43,45 @@ Starting from the **PrIdentity** baseline, this project explores two independent
 
 Let $\phi$ denote a pre-trained FR model. It produces embeddings:
 
-> **Equation 1: Latent Embeddings**
-> $$z_I = \phi(I), \qquad z_A = \phi(A)$$
-> - **$I$**: The original input image.
-> - **$A$**: The anonymized image.
-> - **$z$**: The high-dimensional feature vector (embedding) that encodes the person's identity.
+**Equation 1: Latent Embeddings**
+$$
+z_I = \phi(I), \qquad z_A = \phi(A)
+$$
+- **$I$**: The original input image.
+- **$A$**: The anonymized image.
+- **$z$**: The high-dimensional feature vector (embedding) that encodes the person's identity.
 
 Two images are matched when their cosine similarity exceeds a threshold:
 
-> **Equation 2: Cosine Similarity**
-> $$\cos(z_1, z_2) = \frac{z_1 \cdot z_2}{\|z_1\| \|z_2\|}$$
-> - **$z_1, z_2$**: Two face embeddings.
-> - **Numerator ($z_1 \cdot z_2$)**: The dot product of the two vectors.
-> - **Denominator ($\|z_1\| \|z_2\|$)**: The product of their magnitudes.
-> 
-> **Why we use this:** Deep metric learning networks (like ArcFace) optimize angles, not Euclidean distances. Therefore, calculating the cosine angle between two vectors is the mathematically correct way to determine if an AI thinks two faces belong to the same person.
+**Equation 2: Cosine Similarity**
+$$
+\cos(z_1, z_2) = \frac{z_1 \cdot z_2}{\|z_1\| \|z_2\|}
+$$
+- **$z_1, z_2$**: Two face embeddings.
+- **Numerator ($z_1 \cdot z_2$)**: The dot product of the two vectors.
+- **Denominator ($\|z_1\| \|z_2\|$)**: The product of their magnitudes.
+
+**Why we use this:** Deep metric learning networks (like ArcFace) optimize angles, not Euclidean distances. Therefore, calculating the cosine angle between two vectors is the mathematically correct way to determine if an AI thinks two faces belong to the same person.
 
 All methods in this project share the same basic form:
 
-> **Equation 3: Additive Perturbation**
-> $$A = \text{clip}(I + P, \; 0, 1)$$
-> - **$P$**: A learned or structured adversarial perturbation tensor (noise).
-> - **$\text{clip}(\dots, 0, 1)$**: Ensures the resulting pixels stay within valid image color bounds.
->
-> **Thought Process:** Instead of using GANs which alter the actual facial geometry (and thus destroy utility), adding an imperceptible layer of noise $P$ allows us to surgically alter the image in the exact mathematical directions that blind the AI, while appearing completely invisible to the human eye.
+**Equation 3: Additive Perturbation**
+$$
+A = \text{clip}(I + P, \; 0, 1)
+$$
+- **$P$**: A learned or structured adversarial perturbation tensor (noise).
+- **$\text{clip}(\dots, 0, 1)$**: Ensures the resulting pixels stay within valid image color bounds.
+
+**Thought Process:** Instead of using GANs which alter the actual facial geometry (and thus destroy utility), adding an imperceptible layer of noise $P$ allows us to surgically alter the image in the exact mathematical directions that blind the AI, while appearing completely invisible to the human eye.
 
 The central tension is the **privacy–utility trade-off**: maximizing $\|z_I - z_A\|$ while minimizing $\|I - A\|$ in a perceptually meaningful sense. The trade-off score used throughout this project is:
 
-> **Equation 4: Privacy-Utility Trade-off Score**
-> $$T = \frac{U + \Pr}{2}$$
-> - **$U$ (Utility)**: The mean SSIM (Structural Similarity Index Measure) between $I$ and $A$. Perfect visual similarity = 1.0.
-> - **$\Pr$ (Privacy)**: The fraction of images successfully anonymized (where cosine similarity is pushed below 0).
+**Equation 4: Privacy-Utility Trade-off Score**
+$$
+T = \frac{U + \Pr}{2}
+$$
+- **$U$ (Utility)**: The mean SSIM (Structural Similarity Index Measure) between $I$ and $A$. Perfect visual similarity = 1.0.
+- **$\Pr$ (Privacy)**: The fraction of images successfully anonymized (where cosine similarity is pushed below 0).
 
 ---
 
@@ -91,13 +99,15 @@ The central tension is the **privacy–utility trade-off**: maximizing $\|z_I - 
 
 PrIdentity learns an additive perturbation $P$ by jointly minimizing a privacy loss (maximize embedding distance) and a utility loss (minimize pixel distance). Its key innovation is replacing the fixed $\mathcal{L}_1$ or $\mathcal{L}_2$ norm with a **learnable $p$ parameter** in the $\mathcal{L}_p$ norm:
 
-> **Equation 5: PrIdentity Objective Function**
-> $$\min \left( \sum_{x,y} \|I(x,y) - A(x,y)\|^{p_2} \right)^{1/p_2} + \max\!\left(0,\; \alpha - \left(\sum_{i=1}^{d} \|z_{I,i} - z_{A,i}\|^{p_1}\right)^{1/p_1}\right)$$
-> - **First Term (Utility)**: Calculates the physical pixel difference between the original and anonymized image using norm $p_2$.
-> - **Second Term (Privacy)**: Forces the embeddings $z_I$ and $z_A$ to be pushed apart by at least a margin of $\alpha$, using norm $p_1$.
-> - **$p_1, p_2 \in [1, 2]$**: These are not fixed; they are *learnable parameters* updated during SGD.
-> 
-> **Why it works:** By allowing the math to adapt dynamically, $p_1$ converges toward 1.0 (creating sharp, localized noise that efficiently destroys AI tracking), while $p_2$ converges toward 2.0 (creating smooth, distributed noise that preserves human visual quality).
+**Equation 5: PrIdentity Objective Function**
+$$
+\min \left( \sum_{x,y} \|I(x,y) - A(x,y)\|^{p_2} \right)^{1/p_2} + \max\!\left(0,\; \alpha - \left(\sum_{i=1}^{d} \|z_{I,i} - z_{A,i}\|^{p_1}\right)^{1/p_1}\right)
+$$
+- **First Term (Utility)**: Calculates the physical pixel difference between the original and anonymized image using norm $p_2$.
+- **Second Term (Privacy)**: Forces the embeddings $z_I$ and $z_A$ to be pushed apart by at least a margin of $\alpha$, using norm $p_1$.
+- **$p_1, p_2 \in [1, 2]$**: These are not fixed; they are *learnable parameters* updated during SGD.
+
+**Why it works:** By allowing the math to adapt dynamically, $p_1$ converges toward 1.0 (creating sharp, localized noise that efficiently destroys AI tracking), while $p_2$ converges toward 2.0 (creating smooth, distributed noise that preserves human visual quality).
 
 ### 3.2 Strengths & Limitations
 
@@ -145,13 +155,15 @@ PrIdentity initializes perturbations from random noise, which creates a flat, un
 
 Instead of random noise, $P$ is initialized with a superposition of radial sinusoidal waves:
 
-> **Equation 6: Sinusoidal Initialization**
-> $$P_{\text{init}}(i,j) = \sum_{k=1}^{K} A_k \cdot \sin\!\left(\omega_k \cdot \sqrt{x^2 + y^2} + \phi_k\right)$$
-> - **$(i,j)$ or $(x,y)$**: The pixel coordinates.
-> - **$\omega_k \in \{1, 2, 4, 8\}$**: Specific spatial frequencies.
-> - **$A_k, \phi_k$**: Random amplitudes and phases.
->
-> **Thought Process & Results:** Random TV static creates a mathematically flat loss surface, making it incredibly hard for the optimizer to find a clean solution (resulting in noisy, ugly images). By structuring the initial noise into smooth waves, the optimizer gets a "head start" along a smoother gradient path. This is a primary reason why Approach 1 achieves an incredible 0.9693 SSIM.
+**Equation 6: Sinusoidal Initialization**
+$$
+P_{\text{init}}(i,j) = \sum_{k=1}^{K} A_k \cdot \sin\!\left(\omega_k \cdot \sqrt{x^2 + y^2} + \phi_k\right)
+$$
+- **$(i,j)$ or $(x,y)$**: The pixel coordinates.
+- **$\omega_k \in \{1, 2, 4, 8\}$**: Specific spatial frequencies.
+- **$A_k, \phi_k$**: Random amplitudes and phases.
+
+**Thought Process & Results:** Random TV static creates a mathematically flat loss surface, making it incredibly hard for the optimizer to find a clean solution (resulting in noisy, ugly images). By structuring the initial noise into smooth waves, the optimizer gets a "head start" along a smoother gradient path. This is a primary reason why Approach 1 achieves an incredible 0.9693 SSIM.
 
 **② CLHAE-Inspired Semantic Region Mask**
 
@@ -166,13 +178,15 @@ FR models extract identity predominantly from the eyes, nose, and mouth — not 
 
 The final perturbation applied is $P_{\text{weighted}} = P \odot M$, so that the full $\epsilon$ budget is spent on identity-critical pixels:
 
-> **Equation 7: Semantic Region Masking**
-> $$A = \text{clip}(I + \epsilon \cdot P \odot M, \; 0, 1)$$
-> - **$\odot$**: Hadamard product (element-wise multiplication).
-> - **$M$**: The spatial attention mask generated by InsightFace.
-> - **$\epsilon$**: The maximum allowed perturbation magnitude.
-> 
-> **Thought Process:** A global perturbation wastes valuable noise budget on the background wall or the subject's shirt. By multiplying the noise by the mask $M$, we strictly forbid the optimizer from touching anything except the eyes, nose, and mouth.
+**Equation 7: Semantic Region Masking**
+$$
+A = \text{clip}(I + \epsilon \cdot P \odot M, \; 0, 1)
+$$
+- **$\odot$**: Hadamard product (element-wise multiplication).
+- **$M$**: The spatial attention mask generated by InsightFace.
+- **$\epsilon$**: The maximum allowed perturbation magnitude.
+
+**Thought Process:** A global perturbation wastes valuable noise budget on the background wall or the subject's shirt. By multiplying the noise by the mask $M$, we strictly forbid the optimizer from touching anything except the eyes, nose, and mouth.
 
 <p align="center">
   <img src="images/rajvi_cell23_out0.png" width="90%" alt="Rajvi Semantic Mask">
@@ -184,12 +198,14 @@ The final perturbation applied is $P_{\text{weighted}} = P \odot M$, so that the
 
 Standard softplus continues pushing the embedding distance even after the image is already fully anonymized, wasting gradient budget on perturbation magnitude rather than quality. We cap optimization at a target cosine $\tau = 0$:
 
-> **Equation 8: Capped Privacy Loss**
-> $$\mathcal{L}_{\text{priv}} = \begin{cases} 0 & \cos(z_I, z_A) \leq \tau \\ \text{softplus}\!\left(k \cdot (\cos(z_I, z_A) - \tau)\right) & \text{otherwise} \end{cases}$$
-> - **$\tau$ (target cosine)**: Set to 0.0. A cosine similarity of 0 means the vectors are perfectly orthogonal (the AI has zero confidence they are the same person).
-> - **softplus**: A smooth approximation of the ReLU function.
-> 
-> **Thought Process:** Standard adversarial loss functions push the embedding vectors apart to infinity. If the AI is already 100% fooled, the math will *keep adding noise* just to be "extra sure," which inevitably ruins the image. By setting $\mathcal{L}_{\text{priv}} = 0$ once $\tau$ is reached, the optimizer's attention shifts entirely to the utility loss, saving massive amounts of visual fidelity.
+**Equation 8: Capped Privacy Loss**
+$$
+\mathcal{L}_{\text{priv}} = \begin{cases} 0 & \cos(z_I, z_A) \leq \tau \\ \text{softplus}\!\left(k \cdot (\cos(z_I, z_A) - \tau)\right) & \text{otherwise} \end{cases}
+$$
+- **$\tau$ (target cosine)**: Set to 0.0. A cosine similarity of 0 means the vectors are perfectly orthogonal (the AI has zero confidence they are the same person).
+- **softplus**: A smooth approximation of the ReLU function.
+
+**Thought Process:** Standard adversarial loss functions push the embedding vectors apart to infinity. If the AI is already 100% fooled, the math will *keep adding noise* just to be "extra sure," which inevitably ruins the image. By setting $\mathcal{L}_{\text{priv}} = 0$ once $\tau$ is reached, the optimizer's attention shifts entirely to the utility loss, saving massive amounts of visual fidelity.
 
 **④ LPIPS Utility Loss**
 
@@ -282,36 +298,44 @@ PRISM addresses both by decomposing the image into wavelet sub-bands and using t
 
 The image is decomposed into 2-level DWT sub-bands:
 
-> **Equation 9: Discrete Wavelet Transform (DWT)**
-> $$I \xrightarrow{\text{DWT}} \{LL_2,\; LH_1, HL_1, HH_1,\; LH_2, HL_2, HH_2\}$$
-> - **$LL$ (Low-Low)**: The core structure and smooth colors of the face.
-> - **$LH, HL, HH$**: High-frequency textures (pores, hair strands, sharp edges).
+**Equation 9: Discrete Wavelet Transform (DWT)**
+$$
+I \xrightarrow{\text{DWT}} \{LL_2,\; LH_1, HL_1, HH_1,\; LH_2, HL_2, HH_2\}
+$$
+- **$LL$ (Low-Low)**: The core structure and smooth colors of the face.
+- **$LH, HL, HH$**: High-frequency textures (pores, hair strands, sharp edges).
 
 Each sub-band $s$ receives its own perturbation $P_s$ and its own adaptive norm $p_s \in (1, 2)$:
 
-> **Equation 10: Sub-band Constraints**
-> $$A = \text{IDWT}\!\left(\{B_s + P_s\}_{s}\right), \quad \text{where} \quad \|P_s\|_{p_s} \leq \epsilon_s$$
-> - **IDWT**: Inverse Discrete Wavelet Transform (reconstructs the image).
-> - **$\epsilon_s$**: A specific budget limit for each frequency band.
-> 
-> **Thought Process & Results:** Human eyes are highly sensitive to structural ($LL$) degradation, but virtually blind to texture ($HH$) alterations. By mathematically restricting the $LL$ budget ($\epsilon_{LL} \ll \epsilon_{HH}$), we force the optimizer to hide the adversarial noise entirely inside the high-frequency textures. This is why PRISM yields such incredible structural visual fidelity.
+**Equation 10: Sub-band Constraints**
+$$
+A = \text{IDWT}\!\left(\{B_s + P_s\}_{s}\right), \quad \text{where} \quad \|P_s\|_{p_s} \leq \epsilon_s
+$$
+- **IDWT**: Inverse Discrete Wavelet Transform (reconstructs the image).
+- **$\epsilon_s$**: A specific budget limit for each frequency band.
+
+**Thought Process & Results:** Human eyes are highly sensitive to structural ($LL$) degradation, but virtually blind to texture ($HH$) alterations. By mathematically restricting the $LL$ budget ($\epsilon_{LL} \ll \epsilon_{HH}$), we force the optimizer to hide the adversarial noise entirely inside the high-frequency textures. This is why PRISM yields such incredible structural visual fidelity.
 
 **② Fisher Information Metric (FIM) and Riemannian Privacy Distance**
 
 Instead of pushing embeddings apart in flat Euclidean space, PRISM estimates the local curvature of the FR model's output manifold via a diagonal approximation to the FIM:
 
-> **Equation 11: Fisher Information Metric**
-> $$G(x) \approx \mathbb{E}\!\left[\nabla_x \log p_\theta(y|x)\; \nabla_x \log p_\theta(y|x)^T\right]$$
-> - **$G(x)$**: A matrix representing the "steepness" or sensitivity of the AI's embedding space at point $x$.
-> - **$\nabla_x$**: The gradient (slope) of the AI's probability distribution.
+**Equation 11: Fisher Information Metric**
+$$
+G(x) \approx \mathbb{E}\!\left[\nabla_x \log p_\theta(y|x)\; \nabla_x \log p_\theta(y|x)^T\right]
+$$
+- **$G(x)$**: A matrix representing the "steepness" or sensitivity of the AI's embedding space at point $x$.
+- **$\nabla_x$**: The gradient (slope) of the AI's probability distribution.
 
 The privacy loss then uses a **Riemannian distance** that weights directions by their identity sensitivity:
 
-> **Equation 12: Riemannian Privacy Distance**
-> $$d_R(I, A) = \sqrt{(z_I - z_A)^T G (z_I - z_A)}$$
-> - **$(z_I - z_A)^T G (z_I - z_A)$**: This mathematically calculates distance not in a straight line, but *along the curved manifold* defined by $G$.
-> 
-> **Thought Process & Results:** The latent space of an AI is not a flat plane; it has "hills" and "cliffs". Using standard L2 distance is like trying to walk straight through a mountain. By using the FIM $G$, we calculate exactly where the steepest "cliffs" are in the AI's logic, and we apply noise exclusively along those highly sensitive Riemannian manifolds. This destroys the identity embedding using a tiny fraction of the total noise power.
+**Equation 12: Riemannian Privacy Distance**
+$$
+d_R(I, A) = \sqrt{(z_I - z_A)^T G (z_I - z_A)}
+$$
+- **$(z_I - z_A)^T G (z_I - z_A)$**: This mathematically calculates distance not in a straight line, but *along the curved manifold* defined by $G$.
+
+**Thought Process & Results:** The latent space of an AI is not a flat plane; it has "hills" and "cliffs". Using standard L2 distance is like trying to walk straight through a mountain. By using the FIM $G$, we calculate exactly where the steepest "cliffs" are in the AI's logic, and we apply noise exclusively along those highly sensitive Riemannian manifolds. This destroys the identity embedding using a tiny fraction of the total noise power.
 
 **③ Jacobian Subspace Projection**
 
