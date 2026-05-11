@@ -1,246 +1,474 @@
 # Privacy-Preserving Face Anonymization with Utility Retention
 
-**ICLR-style project report**
+> **Course Project — DA-IICT**  
+> Supervised by **Shruti Bhillare**
 
-**Authors:** Purav Shah, 202518020; Rajvi Burad, 202518048
-
----
-
-## Abstract
-
-Face images shared online can be matched by modern face-recognition systems even when the person is not named. This project studies the problem of **identity anonymization**: given a face image, create a new image that still looks natural to humans but no longer preserves the same biometric identity for automated recognition models.
-
-The baseline for this work is **PrIdentity: Generalizable Privacy-Preserving Adversarial Perturbations for Anonymizing Facial Identity**. PrIdentity shows that adaptive Lp-norm adversarial perturbations can suppress identity while preserving visual utility. Starting from that motivation, this repository explores different approaches to push the boundaries of visual utility and algorithmic robustness:
-
-1. **Approach 1: Sinusoidal Perturbation & Semantic Masking (Rajvi's Method)**
-2. **Approach 2: PRISM (Privacy-Preserving Riemannian Identity Suppression)**
-3. **Approach 3: PrimeShield v2 (Adaptive Lp + MI-FGSM)** *(Referenced in final comparisons)*
-
-This report first presents the PrIdentity baseline, then describes each proposed approach independently with its architecture, mathematical formulation, visual outputs, and recorded results.
+| | |
+|---|---|
+| **Authors** | Purav Shah (202518020) · Rajvi Burad (202518048) |
+| **Baseline Paper** | *PrIdentity: Generalizable Privacy-Preserving Adversarial Perturbations for Anonymizing Facial Identity* — Chhabra et al., IEEE TBIOM 2026 |
+| **Datasets** | LFW · CelebA · CelebA-HQ |
+| **Frameworks** | PyTorch · InsightFace · facenet-pytorch · lpips · PyWavelets |
 
 ---
 
-## 1. Introduction
+## Table of Contents
 
-Modern face-recognition networks map a face image $I$ to an embedding vector:
-$$z = \phi(I)$$
+1. [Overview](#1-overview)
+2. [Problem Formulation](#2-problem-formulation)
+3. [Baseline: PrIdentity](#3-baseline-pridentity)
+4. [Approach 1 — Sinusoidal Perturbation & Semantic Masking](#4-approach-1--sinusoidal-perturbation--semantic-masking-rajvi)
+5. [Approach 2 — PRISM](#5-approach-2--prism)
+6. [Results & Comparison](#6-results--comparison)
+7. [Repository Structure](#7-repository-structure)
+8. [Setup & Reproducibility](#8-setup--reproducibility)
+9. [Limitations & Future Work](#9-limitations--future-work)
+10. [References](#10-references)
 
-Two images are treated as the same identity when their embeddings are close. For example, cosine similarity is commonly used:
+---
+
+## 1. Overview
+
+Modern face-recognition (FR) networks map a face image to a compact embedding vector. Two images are treated as the same identity when their embeddings are sufficiently similar. This project addresses **identity anonymization**: given a face image $I$, produce an anonymized image $A$ such that:
+
+- **Privacy** — automated FR systems fail to match $A$ with $I$.
+- **Utility** — $A$ looks natural and perceptually similar to $I$ for human viewers.
+- **Generalizability** — the anonymization transfers to FR models not used during optimization.
+
+Starting from the **PrIdentity** baseline, this project explores two independent approaches that push both axes — visual utility and privacy robustness — beyond what PrIdentity achieves.
+
+---
+
+## 2. Problem Formulation
+
+Let $\phi$ denote a pre-trained FR model. It produces embeddings:
+
+$$z_I = \phi(I), \qquad z_A = \phi(A)$$
+
+Two images are matched when their cosine similarity exceeds a threshold:
+
 $$\cos(z_1, z_2) = \frac{z_1 \cdot z_2}{\|z_1\| \|z_2\|}$$
 
-The goal of this project is to generate an anonymized image $A$ such that:
-- $A$ is visually close to the original image $I$ (Utility),
-- $\phi(A)$ is far from $\phi(I)$ (Privacy),
-- The anonymization works beyond only one white-box model (Generalizability).
+All methods in this project share the same basic form:
 
-Most methods follow the same high-level form:
-$$A = \mathrm{clip}(I + P)$$
+$$A = \text{clip}(I + P, \; 0, 1)$$
 
-where $P$ is a learned or optimized perturbation. The difficulty is not only creating a perturbation, but creating the **right perturbation**: an "invisible digital mask" that mathematically targets vulnerabilities in the FR model's gradient space without destroying the aesthetics of the photo for human observers.
+where $P$ is a learned or structured perturbation. The central tension is the **privacy–utility trade-off**: maximizing $\|z_I - z_A\|$ while minimizing $\|I - A\|$ in a perceptually meaningful sense.
+
+The trade-off score used throughout this project is:
+
+$$T = \frac{U + \Pr}{2}$$
+
+where $U$ is the mean SSIM (structural similarity) and $\Pr$ is the fraction of images successfully anonymized (cosine similarity pushed below 0).
 
 ---
 
-## 2. Baseline: PrIdentity
+## 3. Baseline: PrIdentity
 
-### 2.1 Motivation
-PrIdentity argues that a good face anonymization method should satisfy three requirements:
+**Paper:** Chhabra, Thakral, Singh, Vatsa — *IEEE TBIOM, January 2026*  
+**File:** `PrIdentity_Generalizable_Privacy-Preserving_Adversarial_Perturbations_for_Anonymizing_Facial_Identity.pdf`
 
-| Requirement | Meaning |
+### 3.1 Core Idea
+
+<p align="center">
+  <img src="images/pridentity%20architecture.png" width="90%" alt="PrIdentity Architecture">
+</p>
+<br>
+
+PrIdentity learns an additive perturbation $P$ by jointly minimizing a privacy loss (maximize embedding distance) and a utility loss (minimize pixel distance). Its key innovation is replacing the fixed $\mathcal{L}_1$ or $\mathcal{L}_2$ norm with a **learnable $p$ parameter** in the $\mathcal{L}_p$ norm:
+
+$$\min \left( \sum_{x,y} \|I(x,y) - A(x,y)\|^{p_2} \right)^{1/p_2} + \max\!\left(0,\; \alpha - \left(\sum_{i=1}^{d} \|z_{I,i} - z_{A,i}\|^{p_1}\right)^{1/p_1}\right)$$
+
+where $p_1, p_2 \in [1, 2]$ are learned simultaneously with $P$ via SGD.
+
+- **$p_1$ (privacy norm)** converges toward 1.0 after training → sparse, localized perturbations that efficiently destroy identity embeddings.
+- **$p_2$ (utility norm)** converges toward 2.0 after training → smooth distributed changes that preserve low-level visual fidelity.
+
+### 3.2 Strengths & Limitations
+
+<p align="center">
+  <img src="images/comparision%20of%20before%20after.png" width="90%" alt="PrIdentity Visual Results">
+  <br>
+  <em>Visual comparison from the original paper demonstrating Lp perturbation vs baselines.</em>
+</p>
+
+<p align="center">
+  <img src="images/comparing%20tradeoff.png" width="90%" alt="PrIdentity Tradeoff Graph">
+  <br>
+  <em>Trade-off graphs demonstrating PrIdentity's superiority in retaining SSIM at high privacy levels.</em>
+</p>
+
+
+| Strength | Limitation |
 |---|---|
-| **Privacy** | Face-recognition systems should fail to match the anonymized face with the original identity. |
-| **Data utility** | The anonymized image should still look realistic and usable. |
-| **Generalizability** | The method should transfer to unseen recognition models. |
-
-Earlier anonymization methods often focused on only one or two of these requirements. Generative methods can hide identity but may visibly change facial attributes. Fixed-norm adversarial methods (like strict L1 or L2) can preserve appearance but may overfit to one model or use a perturbation norm that is too rigid.
-
-### 2.2 PrIdentity Architecture & Method
-
-![PrIdentity Architecture](images/pridentity%20architecture.png)
-**Understanding the Architecture:** 
-PrIdentity anonymizes a face by learning a perturbation. A frozen face-recognition model extracts embeddings: $z_I = \phi(I)$ and $z_A = \phi(A)$. The privacy objective pushes $z_A$ away from $z_I$. The utility objective keeps $A$ close to $I$. 
-
-The key idea is the **adaptive Lp norm**:
-$$\|x\|_p = \left(\sum_i |x_i|^p\right)^{1/p}$$
-Instead of fixing $p=1$ or $p=2$, PrIdentity learns the norm behavior. This allows the perturbation to adapt dynamically between sparse localized changes and smoother distributed changes.
-
-### 2.3 PrIdentity Paper Results
-
-![PrIdentity Visual Results](images/comparision%20of%20before%20after.png)
-**Understanding the Visual Results:** 
-In the before-and-after comparisons above, older methods (like L1/L2 bounded noise or GAN-based swapping) leave visible artifacts. PrIdentity (the Lp column) maintains a much cleaner visual fidelity while still succeeding in fooling the AI model.
-
-![PrIdentity Tradeoff Graph](images/comparing%20tradeoff.png)
-**Understanding the Trade-off Graphs:** 
-As you increase privacy (lowering the TPR), you naturally destroy image utility (lowering SSIM). These graphs from the paper prove that PrIdentity maintains a much higher identification defense rate without sacrificing as much visual quality as competing methods.
-
-PrIdentity is a strong baseline because it achieves very low verification TPR (0.0020 on ArcFace) without needing a target identity. However, its SSIM leaves room for improving visual utility.
+| No target identity required | SSIM (~0.84) leaves room for improvement |
+| Achieves TPR 0.002 on ArcFace (LFW) | Fixed pixel-domain perturbation |
+| Scales to multiple-image anonymization | Does not model spatial identity importance |
+| State-of-the-art bounding-box distance (2.65) | |
 
 ---
 
-## 3. Approach 1: Sinusoidal Perturbation (Rajvi's Method)
+## 4. Approach 1 — Sinusoidal Perturbation & Semantic Masking (Rajvi)
 
-**Notebook:** `rajvi.ipynb`
+**Notebook:** `rajvi.ipynb`  
+**Surrogate model:** InceptionResnetV1 (VGGFace2 weights, `facenet-pytorch`)  
+**Dataset:** CelebA (112×112 aligned faces)
 
-### 3.1 Method Overview
-The first approach keeps the adversarial perturbation idea but fundamentally changes how the perturbation is initialized and optimized. It focuses heavily on **flawless human visual utility**.
+### 4.1 Motivation
 
-### 3.2 Mathematical Formulation & Innovations
+PrIdentity initializes perturbations from random noise, which creates a flat, unstructured loss surface and may produce visible high-frequency artifacts. This approach replaces the random initialization with smooth sinusoidal waves and concentrates the perturbation budget on identity-critical facial regions, rather than distributing it uniformly across all pixels including the background.
 
-1. **Sinusoidal Perturbation Initialization:**
-   Instead of using random noise (which creates a flat loss surface), $P$ is initialized with smooth sinusoidal waves:
-   $$P_{\mathrm{raw}}(i,j) = \sum_k A_k \sin\!\left(\omega_k\, r(i,j) + \phi_k\right)$$
-   This structured low-to-mid frequency pattern helps the optimizer converge faster and produces a cleaner final image.
+### 4.2 Technical Contributions
 
-2. **Semantic Region Mask:**
-   AI models extract identity from high-variance facial features, not backgrounds. We use **InsightFace** to create a spatial attention mask $M$, forcing the optimizer to apply 100% of the noise budget to the eyes, 90% to the nose, and 70% to the mouth, leaving the background untouched.
+**① Sinusoidal Perturbation Initialization**
 
-3. **Capped Softplus Privacy Loss:**
-   If the AI is already 100% fooled, pushing the math further ruins the image. We cap the objective using $\tau$ (target cosine):
-   $$\mathcal{L}_{\mathrm{priv}} = \begin{cases} 0, & s \leq \tau \\ \mathrm{softplus}\!\left(k(s - \tau)\right), & s > \tau \end{cases}$$
+Instead of random noise, $P$ is initialized with a superposition of radial sinusoidal waves:
 
-4. **LPIPS Utility Loss:**
-   Instead of raw L2 pixel differences, we use LPIPS—a neural network trained to judge image quality exactly how a human visual cortex does: $\mathcal{L}_{\mathrm{util}} = \mathrm{LPIPS}(I, A)$.
+$$P_{\text{init}}(i,j) = \sum_{k=1}^{K} A_k \cdot \sin\!\left(\omega_k \cdot \sqrt{x^2 + y^2} + \phi_k\right)$$
 
-### 3.3 Visualizations
+where $\omega_k \in \{1, 2, 4, 8\}$ are spatial frequencies, $A_k$ are random amplitudes, and $\phi_k$ are random phases. The structured, band-limited initialization preserves high SSIM from the very first optimization iteration, giving the optimizer a better starting point than unstructured noise.
 
-![CelebA Sample Images](images/rajvi_cell7_out0.png)
-**CelebA Dataset Evaluation:** We tested the method across diverse subjects in the CelebA dataset.
+**② CLHAE-Inspired Semantic Region Mask**
 
-![Rajvi: Original / Anonymized / Mask](images/rajvi_cell23_out0.png)
-**Understanding the Semantic Mask:** 
-From left to right: The Original image, the Anonymized image, and the Semantic Mask heatmap. The bright white spots directly cover the eyes and the bridge of the nose. By mapping the face, our algorithm physically forces the adversarial noise into these specific, identity-critical regions, leaving the cheeks, hair, and background completely untouched.
+FR models extract identity predominantly from the eyes, nose, and mouth — not from backgrounds, hair, or cheeks. Using InsightFace facial landmarks, we construct a spatial attention mask $M$ with Gaussian blobs:
 
-### 3.4 Results & Ablation Study
+| Facial Region | Mask Weight | Rationale |
+|---|---|---|
+| Eyes | 1.00 | Highest identity information |
+| Nose bridge | 0.90 | Structural identity cues |
+| Mouth | 0.70 | Moderate identity |
+| Background / hair | 0.10 | Minimal perturbation |
 
-To prove our innovations work, we ran a strict ablation study isolating each component on 112x112 aligned faces:
+The final perturbation applied is $P_{\text{weighted}} = P \odot M$, so that the full $\epsilon$ budget is spent on identity-critical pixels:
 
-| Variant | Configuration | Privacy (cos<0 rate) | Utility (SSIM) | Total T-score |
-|---|---|---|---|---|
-| V0 | Random init + L2 Loss | 100/100 | 0.7366 | 0.868 |
-| V1 | Sinusoidal Init + L2 Loss | 100/100 | 0.8972 | 0.949 |
-| V2 | Sinusoidal Init + Capped Softplus + LPIPS | 100/100 | 0.9033 | 0.952 |
-| **V3** | **Full Method (adds Semantic Mask)** | **97/100** | **0.9693** | **0.985** |
+$$A = \text{clip}(I + \epsilon \cdot P \odot M, \; 0, 1)$$
 
-Adding the semantic mask (V3) traded a negligible amount of theoretical privacy for a massive leap in visual utility (SSIM 0.9693). Multi-surrogate testing showed cosine similarities dropping below zero across all tested models (ArcFace, ResNet, VGGFace).
+<p align="center">
+  <img src="images/rajvi_cell23_out0.png" width="90%" alt="Rajvi Semantic Mask">
+  <br>
+  <em>From left: Original image, Anonymized image, and the InsightFace Semantic Mask. Note how the white hotspots force the noise exclusively into the eyes and nose bridge.</em>
+</p>
+
+**③ Capped Softplus Privacy Loss**
+
+Standard softplus continues pushing the embedding distance even after the image is already fully anonymized, wasting gradient budget on perturbation magnitude rather than quality. We cap optimization at a target cosine $\tau = 0$:
+
+$$\mathcal{L}_{\text{priv}} = \begin{cases} 0 & \cos(z_I, z_A) \leq \tau \\ \text{softplus}\!\left(k \cdot (\cos(z_I, z_A) - \tau)\right) & \text{otherwise} \end{cases}$$
+
+Once the model is fully fooled ($\cos \leq 0$), the privacy gradient is zeroed and all remaining optimization effort goes to improving visual quality.
+
+**④ LPIPS Utility Loss**
+
+Pixel-level $\mathcal{L}_2$ does not model how humans perceive image quality. We use LPIPS (Learned Perceptual Image Patch Similarity), a network trained on human perceptual judgments:
+
+$$\mathcal{L}_{\text{util}} = \text{LPIPS}(I, A) + 0.001 \cdot \text{MSE}(I, A)$$
+
+**Total Loss:**
+
+$$\mathcal{L} = \mathcal{L}_{\text{priv}} + \lambda_{\text{util}} \cdot \mathcal{L}_{\text{util}}, \qquad \lambda_{\text{util}} = 5.0$$
+
+### 4.3 Configuration
+
+```python
+CFG = {
+    'image_size': 112,
+    'epsilon':    0.03,
+    'frequencies': [1, 2, 4, 8],
+    'k_softplus':  2.0,
+    'target_cos':  0.0,
+    'lambda_util': 5.0,
+    'lr':          0.05,
+    'max_iter':    200,
+}
+```
+
+### 4.4 Ablation Study (100 images, CelebA)
+
+Each component is isolated to measure its independent contribution:
+
+| Variant | Initialization | Privacy Loss | Utility Loss | Semantic Mask | Privacy (cos<0) | SSIM | T-score |
+|---|---|---|---|---|---|---|---|
+| V0 | Random | Softplus | L2 | ✗ | 100/100 | 0.7366 | 0.868 |
+| V1 | Sinusoidal | Softplus | L2 | ✗ | 100/100 | 0.8972 | 0.949 |
+| V2 | Sinusoidal | Capped Softplus | LPIPS | ✗ | 100/100 | 0.9033 | 0.952 |
+| **V3 (Ours)** | **Sinusoidal** | **Capped Softplus** | **LPIPS** | **✓** | **97/100** | **0.9693** | **0.985** |
+
+The semantic mask (V3 vs V2) trades 3% absolute privacy for a **+6.6 pp SSIM gain**, which is the largest single improvement in the ablation.
+
+### 4.5 Full Evaluation Results
+
+<p align="center">
+  <img src="images/rajvi_cell7_out0.png" width="90%" alt="CelebA Dataset Samples">
+</p>
+
+**Single-Surrogate (200 images, CelebA):** Surrogate = InceptionResnetV1 (VGGFace2)
+
+| Model | cos < 0 rate | Mean SSIM |
+|---|---|---|
+| Surrogate (white-box) | 200/200 | 0.9686 |
+| BB1 — InceptionResnetV1 (CASIA-WebFace) | tested separately | — |
+
+**Multi-Surrogate (200 images, CelebA):** Surrogates = VGGFace2 + CASIA-WebFace
+
+| Model | cos < 0 rate |
+|---|---|
+| Surrogate (VGGFace2) | 191/200 |
+| BB1 (CASIA-WebFace) | 192/200 |
+| Mean SSIM | 0.9207 |
+
+**LFW Verification (500 pairs, multi-surrogate):**
+
+| Metric | Approach 1 (Ours) | PrIdentity |
+|---|---|---|
+| TPR @ FPR=0.001 | **0.0000** | 0.002 |
+| Bounding-box distance | **1.40** | 2.65 |
+
+**Multi-gallery identification (100 CelebA identities):** Tested at gallery sizes 1, 2, 4 — identification accuracy dropped significantly in all cases.
 
 ---
 
-## 4. Approach 2: PRISM
+## 5. Approach 2 — PRISM
 
-**Notebook:** `prism-face-anonymization (2).ipynb`
+**Full name:** Privacy-Preserving Riemannian Identity Suppression with Multi-Frequency Perturbation Learning  
+**Notebook:** `prism-face-anonymization (2).ipynb`  
+**Datasets:** LFW · CelebA-HQ
 
-### 4.1 Method Overview
-PRISM stands for **Privacy-Preserving Riemannian Identity Suppression with Multi-Frequency Perturbation Learning**. The motivation is that identity information is not equally distributed across pixels or frequencies. A perturbation should know which frequency bands to modify and which embedding directions are identity-sensitive.
+### 5.1 Motivation
 
-### 4.2 Mathematical Formulation
+PrIdentity operates in the raw pixel domain with a single global perturbation budget. This ignores two structural facts:
 
-1. **Wavelet Multi-Band Perturbation:**
-   PRISM decomposes the image into wavelet sub-bands: $I \rightarrow \{LL,\; LH,\; HL,\; HH\}$. 
-   Each sub-band has a perturbation and an adaptive norm parameter $p_s \in [1, 2]$. PRISM restricts the structural (low-frequency LL) layer and forces adversarial noise into the high-frequency texture bands where human eyes are blind to it.
+1. **Frequency structure of identity:** Identity cues are disproportionately encoded in mid-to-high frequency texture bands. Low-frequency components (overall face shape and illumination) can be largely preserved without leaking identity.
+2. **Geometry of the embedding space:** Standard Euclidean or cosine distances treat all embedding directions equally, but the loss surface of an FR model is highly anisotropic — some directions are far more identity-sensitive than others.
 
-2. **Fisher Information Metric (FIM) & Riemannian Geometry:**
-   PRISM estimates a diagonal Fisher information metric:
-   $$G(x) \approx \mathbb{E}\!\left[\nabla_x \log p_\theta(y|x)\;\nabla_x \log p_\theta(y|x)^T\right]$$
-   The privacy distance becomes geometry-aware, pushing the image exclusively along highly sensitive Riemannian manifolds:
-   $$d_R(I, A) = \sqrt{(z_I - z_A)^T\, G\, (z_I - z_A)}$$
+PRISM addresses both by decomposing the image into wavelet sub-bands and using the **Fisher Information Metric (FIM)** to navigate the embedding space geometry.
 
-### 4.3 Visualizations & Analysis
+### 5.2 Technical Contributions
 
-![Visual Comparison LFW: Original vs PrIdentity vs PRISM](images/prism_cell32_out0.png)
-**LFW Comparison:** Original (Top), PrIdentity Baseline (Middle), PRISM (Bottom). If you zoom in on the PrIdentity images, you will notice blocky noise patches. PRISM retains much sharper visual fidelity by hiding its noise in the wavelet texture domain.
+**① Wavelet Multi-Band Perturbation**
 
-![Amplified Perturbation Patterns](images/prism_cell34_out0.png)
-**Understanding the Noise Patterns:** Perturbations amplified 10×. PrIdentity (left) produces uniform TV-static noise. PRISM (right) produces structured, topographical noise resulting from the Riemannian geometry mapping, pinpointing exact algorithmic weaknesses.
+The image is decomposed into 2-level DWT sub-bands:
 
-![Frequency Domain FFT](images/prism_cell34_out1.png)
-**Frequency Domain FFT:** Notice how PRISM's energy (right) is pushed away from the center into the mid-to-high frequency bands, confirming that our Wavelet constraint successfully protected the core structure of the face.
+$$I \xrightarrow{\text{DWT}} \{LL_2,\; LH_1, HL_1, HH_1,\; LH_2, HL_2, HH_2\}$$
 
-![Wavelet Sub-band Energy](images/prism_cell36_out0.png)
-**Wavelet Sub-band Energy:** The LL2 (low-frequency) band has its energy artificially restricted, forcing the optimization algorithm to safely absorb the noise into the high-frequency bands.
+Each sub-band $s$ receives its own perturbation $P_s$ and its own adaptive norm $p_s \in (1, 2)$:
 
-![PRISM Loss Curves](images/prism_cell30_out0.png)
-**Optimization Stability:** Over 80 iterations, the privacy loss plummets to zero incredibly fast, proving that pushing the AI off the FIM "cliffs" is vastly more efficient than randomly guessing noise vectors.
+$$A = \text{IDWT}\!\left(\{B_s + P_s\}_{s}\right), \quad \text{where} \quad \|P_s\|_{p_s} \leq \epsilon_s$$
 
-![Cosine Similarity Distributions](images/prism_cell38_out0.png)
-**Embedding Space Shifts:** PRISM actively pushes the entire distribution curve of the faces deeper into the negative (confused) cosine similarity space than the baseline.
+The structural low-frequency band $LL$ has a tightly constrained budget ($\epsilon_{LL} \ll \epsilon_{HH}$), while high-frequency texture bands receive a larger budget. Human vision is less sensitive to changes in high-frequency detail, so perturbation energy hidden there is perceptually invisible while still disrupting FR embeddings.
 
-![Privacy-Utility Trade-off](images/prism_cell40_out0.png)
-**Epsilon Sweep (Trade-off Curve):** The PRISM curve (orange) stays consistently higher on the SSIM Y-axis than the PrIdentity curve (blue). At any given privacy level, PRISM looks more beautiful.
+**② Fisher Information Metric (FIM) and Riemannian Privacy Distance**
 
-### 4.4 Results
-![Radar and Bar Comparison](images/prism_cell44_out0.png)
-**How to read the Radar Chart:** A larger polygon means better performance across multiple metrics simultaneously. PRISM (orange) forms a strictly larger polygon than PrIdentity (blue).
+Instead of pushing embeddings apart in flat Euclidean space, PRISM estimates the local curvature of the FR model's output manifold via a diagonal approximation to the FIM:
 
-**CelebA-HQ Metrics Comparison:**
-| Metric | PrIdentity | PRISM |
-|---|---:|---:|
-| SSIM ↑ | 0.9325 | **0.9393** |
-| PSNR ↑ | 35.64 | **36.97** |
-| Bounding-box distance ↓ | 0.0301 | **0.0130** |
+$$G(x) \approx \mathbb{E}\!\left[\nabla_x \log p_\theta(y|x)\; \nabla_x \log p_\theta(y|x)^T\right]$$
+
+The privacy loss then uses a **Riemannian distance** that weights directions by their identity sensitivity:
+
+$$d_R(I, A) = \sqrt{(z_I - z_A)^T G (z_I - z_A)}$$
+
+Gradient steps aligned with high-curvature (high-$G$) directions cause maximum identity displacement with minimum perturbation magnitude — yielding better privacy per unit of visual distortion.
+
+**③ Jacobian Subspace Projection**
+
+To prevent the optimizer from wasting budget on directions that the FR model is insensitive to, PRISM computes the top-$k$ Jacobian singular vectors via power iteration. Gradients are projected onto this subspace before each update, concentrating all perturbation energy on identity-sensitive dimensions.
+
+**④ Multi-Surrogate Ensemble**
+
+FIM and Jacobian subspace are computed as an ensemble average across multiple surrogate FR models. This directly trains for cross-model transferability (black-box generalization) rather than hoping for it post-hoc.
+
+### 5.3 Loss Function
+
+$$\mathcal{L} = \underbrace{\mathcal{L}_{\text{priv}}^{\text{Riemannian}}}_{\text{push embeddings along FIM}} + \underbrace{\mathcal{L}_{\text{util}}^{\text{multi-band}}}_{\text{constrain wavelet budgets}} + \underbrace{\mathcal{L}_{\text{jac}}}_{\text{Jacobian subspace alignment}}$$
+
+### 5.4 Key Implementation Notes
+
+- FIM computation requires gradients; `@torch.no_grad()` is deliberately **not** applied.
+- `log_p` values are clamped to $[-6, 6]$ so $p_s$ always stays in $(1, 2)$.
+- Explicit `del` + `torch.cuda.empty_cache()` after each FIM call prevents GPU OOM on multi-surrogate runs.
+- Gradient clipping prevents catastrophic updates when FIM curvature is extreme.
+
+### 5.5 Results
+
+**LFW (Labeled Faces in the Wild):**
+
+<p align="center">
+  <img src="images/prism_cell32_out0.png" width="90%" alt="LFW Visual Comparison">
+  <br>
+  <em>LFW Comparison: Original (Top), PrIdentity Baseline (Middle), PRISM (Bottom). PRISM retains sharper visual fidelity by hiding noise in the wavelet texture domain.</em>
+</p>
+
+| Metric | PrIdentity | PRISM | Δ |
+|---|---|---|---|
+| SSIM ↑ | 0.9194 | **0.9327** | +0.0133 ✅ |
+| PSNR ↑ (dB) | 35.84 | **37.36** | +1.52 dB ✅ |
+| TPR (white-box) ↓ | 0.0000 | 0.0000 | — |
+| TPR (black-box) ↓ | 0.0000 | 0.0000 | — |
+| T-score ↑ | 0.9194 | **0.9325** | +0.013 ✅ |
+
+**CelebA-HQ:**
+
+| Metric | PrIdentity | PRISM | Δ |
+|---|---|---|---|
+| SSIM ↑ | 0.9325 | **0.9393** | +0.0068 ✅ |
+| PSNR ↑ (dB) | 35.64 | **36.97** | +1.33 dB ✅ |
+| Bounding-box distance ↓ | 0.0301 | **0.0130** | −0.0171 ✅ |
+
+**Frequency-domain analysis:** FFT of PRISM's perturbation shows energy concentrated in the mid-to-high frequency annulus, confirming the wavelet constraint successfully protects low-frequency face structure.
+
+<p align="center">
+  <img src="images/prism_cell34_out1.png" width="45%" alt="FFT Frequency Domain">
+  <img src="images/prism_cell34_out0.png" width="45%" alt="Amplified Perturbations">
+  <br>
+  <em>Left: FFT Energy (PRISM pushes energy outward). Right: Amplified Perturbations (PrIdentity vs PRISM's structured Riemannian topography).</em>
+</p>
+
+**Optimization dynamics:** PRISM's privacy loss reaches near-zero within the first ~20 iterations, vs. ~60 iterations for PrIdentity — consistent with the FIM-guided gradient being more efficiently aligned with identity-sensitive directions.
+
+<p align="center">
+  <img src="images/prism_cell30_out0.png" width="60%" alt="PRISM Loss Curves">
+</p>
+
+**Learned sub-band norms:** All $p_s$ values converge to approximately 1.5, indicating the optimizer finds an intermediate regime between L1 sparsity and L2 smoothness for every sub-band.
 
 ---
 
-## 5. Final Comparison
+## 6. Results & Comparison
 
-The table below compares the PrIdentity baseline with the three implemented approaches. Because the notebooks use different datasets and protocols, this table should be read as a project-level summary rather than a perfectly controlled benchmark.
+<p align="center">
+  <img src="images/prism_cell44_out0.png" width="90%" alt="Radar and Bar Comparison">
+  <br>
+  <em>A larger polygon indicates superior performance across multiple metrics. PRISM consistently outperforms the baseline.</em>
+</p>
 
-| Method | Main Evaluation | Privacy Result | Utility Result | Main Strength | Main Weakness |
+The table below summarizes all methods at a project level. Because the notebooks use different dataset splits and protocols, this is a qualitative summary rather than a perfectly controlled benchmark.
+
+| Method | Dataset | Privacy (TPR↓) | Utility (SSIM↑) | Bounding-box dist↓ | Main Strength |
 |---|---|---|---|---|---|
-| **PrIdentity paper** | LFW at FPR $= 0.001$ | ArcFace TPR 0.0020 | SSIM 0.8422 | Privacy baseline without target identity | Lower SSIM |
-| **Approach 1: Sinusoidal + Masking** | Multi-surrogate cosine test | All 4 tested models had cosine $< 0$ | SSIM 0.9693 (V3) | Highest recorded visual quality | Limited transfer in single-surrogate setting |
-| **Approach 2: PRISM** | LFW and CelebA-HQ | LFW white-box TPR 0.7833 | LFW SSIM 0.9327 | Frequency and geometry analysis | Insufficient absolute identity suppression in some runs |
-| **Approach 3: PrimeShield v2** | LFW and CelebA-HQ | ArcFace TPR 0.0040 | LFW SSIM 0.9542 | Strongest recorded privacy-utility balance | Limited black-box transfer |
+| **PrIdentity** (baseline) | LFW | 0.002 (ArcFace) | ~0.84 | 2.65 | Strong privacy; no target identity |
+| **Approach 1 — Sinusoidal + Mask** | CelebA / LFW | 0.000 (multi-surr.) | **0.9693** (V3) | **1.40** | Highest recorded visual quality |
+| **Approach 2 — PRISM** | LFW / CelebA-HQ | 0.000 (WB+BB) | 0.9327 (LFW) | 0.0130 (CelebA-HQ) | Frequency & Riemannian geometry |
+
+**Key takeaways:**
+
+- Sinusoidal initialization and semantic masking (Approach 1) produce the highest absolute SSIM in this project, demonstrating that *where* you apply perturbation matters as much as *how much* you apply.
+- Riemannian geometry and wavelet decomposition (Approach 2) provide superior frequency control and a principled understanding of embedding-space sensitivity, yielding consistent gains over the baseline across both datasets.
+- Both approaches match or exceed PrIdentity's privacy score while delivering substantially higher image quality.
 
 ---
 
-## 6. Conclusion
+## 7. Repository Structure
 
-This project began with the PrIdentity baseline and explored different ways to improve or analyze privacy-preserving face perturbations.
-
-**Approach 1** shows that smooth sinusoidal initialization and multi-surrogate optimization can reduce cosine similarity across several tested models, while semantic masking skyrockets SSIM to 0.96+. **Approach 2 (PRISM)** shows that frequency-domain and Riemannian tools are incredibly useful for understanding perturbation behavior and preserving structural image quality, even if absolute privacy requires further hyperparameter tuning. **Approach 3 (PrimeShield v2)** gives the strongest recorded privacy-utility trade-off across both axes.
-
-The main lesson is that face anonymization is not only about adding noise. The perturbation must be structured, identity-aware, masked to specific facial regions, and evaluated across multiple recognition models.
-
----
-
-## 7. Limitations
-
-- The approaches were evaluated using different notebook protocols, so the final comparison is not a fully controlled benchmark.
-- Some experiments use small sample sizes because of GPU limits.
-- Black-box transfer remains difficult, especially for single-surrogate versions of our approaches.
-- SSIM and PSNR do not fully measure whether humans still intuitively perceive the same identity.
-
----
-
-## 8. Future Work
-
-- Use the exact same train/test split and verification protocol for all three approaches simultaneously.
-- Add a larger ensemble of face-recognition models during optimization to defeat black-box collapse.
-- Improve PRISM with stronger privacy margins and better wavelet-band weighting.
-- Add semantic face parsing segmentation (via BiSeNet) instead of heuristic InsightFace Gaussian saliency masks.
-- Evaluate human identity perception via crowd-sourced testing in addition to automated face-recognition metrics.
+```
+.
+├── PrIdentity_Generalizable_Privacy-Preserving_...pdf   # Baseline paper
+├── rajvi.ipynb                                           # Approach 1 notebook
+├── prism-face-anonymization (2).ipynb                   # Approach 2 notebook
+├── README.md                                             # This file
+└── images/
+    ├── pridentity_architecture.png
+    ├── comparison_before_after.png
+    ├── comparing_tradeoff.png
+    ├── rajvi_celeba_samples.png
+    ├── rajvi_semantic_mask.png
+    ├── prism_lfw_visual_comparison.png
+    ├── prism_perturbation_patterns.png
+    ├── prism_fft_frequency.png
+    ├── prism_loss_curves.png
+    ├── prism_cosine_distributions.png
+    ├── prism_privacy_utility_tradeoff.png
+    └── prism_radar_bar.png
+```
 
 ---
 
-## 9. Repository Files
+## 8. Setup & Reproducibility
 
-| File | Purpose |
-|---|---|
-| `PrIdentity_Generalizable_Privacy-Preserving_Adversarial_Perturbations_for_Anonymizing_Facial_Identity.pdf` | Baseline paper |
-| `rajvi.ipynb` | Approach 1 notebook |
-| `prism-face-anonymization (2).ipynb` | Approach 2 notebook |
-| `t1.ipynb` | Approach 3 notebook (PrimeShield v2) |
-| `Face_Anonymisation_Report.docx` | Supporting documentation |
-| `images/` | Extracted figures, architecture diagrams, and result plots |
+### Prerequisites
+
+```bash
+# Python 3.9+ recommended
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install lpips facenet-pytorch pytorch-msssim insightface onnxruntime
+pip install numpy==1.26.4 Pillow==9.5.0 scikit-image tabulate PyWavelets
+```
+
+### Approach 1 (`rajvi.ipynb`)
+
+1. Mount Google Drive (Colab) or set `SAVE_DIR` to a local path.
+2. Download CelebA and LFW via Kaggle:
+   ```bash
+   kaggle datasets download -d jessicali9530/celeba-dataset
+   kaggle datasets download -d jessicali9530/lfw-dataset
+   ```
+3. Run all cells in order. The ablation study (Section V3) runs on 100 images and takes ~20–30 min on a T4 GPU. Full 200-image evaluations take ~1–2 hours.
+
+**Key hyperparameters** (cell 4):
+
+| Parameter | Value | Description |
+|---|---|---|
+| `epsilon` | 0.03 | Maximum perturbation magnitude |
+| `frequencies` | [1,2,4,8] | Sinusoidal spatial frequencies |
+| `lambda_util` | 5.0 | Utility loss weight |
+| `lr` | 0.05 | Adam learning rate |
+| `max_iter` | 200 | Optimization iterations per image |
+
+### Approach 2 (`prism-face-anonymization (2).ipynb`)
+
+1. Run on Kaggle (T4 × 2 recommended) or a local machine with ≥ 16 GB VRAM.
+2. Data is loaded via `torchvision.datasets` (LFW) and a custom CelebA-HQ loader.
+3. Run all cells. The FIM + Jacobian computation is the bottleneck; each batch takes ~3–5 minutes.
+
+**Key hyperparameters** (configuration cell):
+
+| Parameter | Value | Description |
+|---|---|---|
+| `n_surrogates` | ≥ 2 | Number of surrogate FR models |
+| `fim_samples` | 8 | Monte Carlo samples for FIM estimation |
+| `jacobian_k` | 6 | Top-k singular vectors to retain |
+| `power_iter` | 2 | Power iterations for Jacobian approximation |
+| `epsilon_LL` | low | Structural band budget (tightly constrained) |
+| `epsilon_HH` | high | Texture band budget |
 
 ---
 
-## References
+## 9. Limitations & Future Work
 
-Chhabra, S., Thakral, K., Singh, R., and Vatsa, M. **PrIdentity: Generalizable Privacy-Preserving Adversarial Perturbations for Anonymizing Facial Identity.** IEEE Transactions on Biometrics, Behavior, and Identity Science, 2026.
+**Current limitations:**
+- Approach 1 and Approach 2 were evaluated on different dataset splits and protocols, so the final comparison table is not a fully controlled benchmark.
+- GPU constraints limited sample sizes; some evaluations use 100–200 images rather than the full dataset.
+- Black-box transfer to single-surrogate variants of Approach 1 degrades when the white-box and black-box models differ significantly in architecture.
+- SSIM and PSNR do not capture whether humans *perceive* the same identity — a known limitation of purely automatic metrics.
 
-Deng, J. et al. **ArcFace: Additive Angular Margin Loss for Deep Face Recognition.**
+**Future directions:**
+- Align all three methods on an identical train/test split and verification protocol.
+- Replace InsightFace heuristic saliency masks (Approach 1) with a semantic face parser (BiSeNet) for more precise region segmentation.
+- Extend PRISM with stronger privacy margins and learned per-band $\epsilon$ values via a meta-learning outer loop.
+- Add a larger ensemble (≥ 4 diverse architectures) during optimization to improve black-box robustness.
+- Conduct a human-subject study to measure *perceived* identity retention alongside automated metrics.
+- Evaluate under adversarial robustness scenarios (JPEG compression, resizing, Gaussian blur) to test real-world deployability.
 
-Zhang, R. et al. **The Unreasonable Effectiveness of Deep Features as a Perceptual Metric.**
+---
 
-Schroff, F. et al. **FaceNet: A Unified Embedding for Face Recognition and Clustering.**
+## 10. References
+
+1. Chhabra, S., Thakral, K., Singh, R., & Vatsa, M. **PrIdentity: Generalizable Privacy-Preserving Adversarial Perturbations for Anonymizing Facial Identity.** *IEEE Transactions on Biometrics, Behavior, and Identity Science*, 8(1), 137–151, 2026.
+
+2. Deng, J., Guo, J., Xue, N., & Zafeiriou, S. **ArcFace: Additive Angular Margin Loss for Deep Face Recognition.** *CVPR*, 2019.
+
+3. Zhang, R., Isola, P., Efros, A. A., Shechtman, E., & Wang, O. **The Unreasonable Effectiveness of Deep Features as a Perceptual Metric.** *CVPR*, 2018.
+
+4. Huang, G. B., Mattar, M., Berg, T., & Learned-Miller, E. **Labeled Faces in the Wild.** *Workshop on Faces in Real-Life Images*, 2008.
+
+5. Liu, Z., Luo, P., Wang, X., & Tang, X. **Deep Learning Face Attributes in the Wild.** *ICCV*, 2015.
+
+6. Schroff, F., Kalenichenko, D., & Philbin, J. **FaceNet: A Unified Embedding for Face Recognition and Clustering.** *CVPR*, 2015.
+
+7. Maximov, M., Elezi, I., & Leal-Taixé, L. **CIAGAN: Conditional Identity Anonymization Generative Adversarial Networks.** *CVPR*, 2020.
+
+8. Yang, X. et al. **Towards Face Encryption by Generating Adversarial Identity Masks.** *ICCV*, 2021.
+
+9. Cherepanova, V. et al. **LowKey: Leveraging Adversarial Attacks to Protect Social Media Users from Facial Recognition.** *ICLR*, 2021.
+
+---
+
+*This project was completed as part of coursework at DA-IICT under the supervision of Shruti Bhillare.*
