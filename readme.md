@@ -114,6 +114,12 @@ where $p_1, p_2 \in [1, 2]$ are learned simultaneously with $P$ via SGD.
 **Surrogate model:** InceptionResnetV1 (VGGFace2 weights, `facenet-pytorch`)  
 **Dataset:** CelebA (112×112 aligned faces)
 
+<p align="center">
+  <img src="images/rajvi_architecture.png" width="90%" alt="Approach 1 Architecture">
+  <br>
+  <em>Architecture overview of the Sinusoidal Perturbation and Semantic Masking pipeline.</em>
+</p>
+
 ### 4.1 Motivation
 
 PrIdentity initializes perturbations from random noise, which creates a flat, unstructured loss surface and may produce visible high-frequency artifacts. This approach replaces the random initialization with smooth sinusoidal waves and concentrates the perturbation budget on identity-critical facial regions, rather than distributing it uniformly across all pixels including the background.
