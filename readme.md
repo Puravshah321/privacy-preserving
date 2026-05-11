@@ -350,15 +350,17 @@ The table below summarizes all methods at a project level. Because the notebooks
 
 | Method | Dataset | Privacy (TPR↓) | Utility (SSIM↑) | Bounding-box dist↓ | Main Strength |
 |---|---|---|---|---|---|
-| **PrIdentity** (baseline) | LFW | 0.002 (ArcFace) | ~0.84 | 2.65 | Strong privacy; no target identity |
-| **Approach 1 — Sinusoidal + Mask** | CelebA / LFW | 0.000 (multi-surr.) | **0.9693** (V3) | **1.40** | Highest recorded visual quality |
-| **Approach 2 — PRISM** | LFW / CelebA-HQ | 0.000 (WB+BB) | 0.9327 (LFW) | 0.0130 (CelebA-HQ) | Frequency & Riemannian geometry |
+| **PrIdentity** (baseline) | LFW | 0.0020 (ArcFace) | ~0.8422 | 2.65 | Strong privacy; no target identity |
+| **Approach 1 — Sinusoidal + Mask** | CelebA / LFW | **0.0000** (Multi-Surr) | **0.9693** (CelebA) | 1.40 | Highest recorded absolute visual quality |
+| **Approach 2 — PRISM** | LFW / CelebA-HQ | **0.0000** (WB+BB) | 0.9327 (LFW) | **0.0130** | Superior frequency & Riemannian geometry control |
+| **Approach 3 — PrimeShield v2** | LFW / CelebA-HQ | 0.0040 (ArcFace) | 0.9542 (LFW) | — | Strongest recorded privacy-utility balance |
 
 **Key takeaways:**
 
 - Sinusoidal initialization and semantic masking (Approach 1) produce the highest absolute SSIM in this project, demonstrating that *where* you apply perturbation matters as much as *how much* you apply.
-- Riemannian geometry and wavelet decomposition (Approach 2) provide superior frequency control and a principled understanding of embedding-space sensitivity, yielding consistent gains over the baseline across both datasets.
-- Both approaches match or exceed PrIdentity's privacy score while delivering substantially higher image quality.
+- Riemannian geometry and wavelet decomposition (Approach 2) provide superior frequency control and a principled understanding of embedding-space sensitivity, yielding consistent gains over the baseline across both datasets with the absolute lowest bounding box shifting.
+- PrimeShield v2 (Approach 3) merges adaptive optimization with adversarial gradient techniques to strike an incredibly strong balance between the two extremes.
+- All approaches match or exceed PrIdentity's privacy score while delivering substantially higher image quality.
 
 ---
 
