@@ -381,11 +381,6 @@ Key observations:
 - **Naturalness**: No obvious artifacts, watermarking, or reconstruction errors
 - **Texture Changes**: Concentrated on high-frequency regions where humans are tolerant
 
-#### General Anonymization Comparison
-
-![Before and after anonymization](images/comparision%20of%20before%20after.png)
-
-*Figure 8. General before-after comparison across multiple face images, showing the consistency of FASP across different facial poses, ages, and lighting conditions.*
 
 ### 5.3 Overview
 
